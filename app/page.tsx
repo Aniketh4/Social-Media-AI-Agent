@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import Navbar from "@/components/navbar"
 import HeroSection from "@/components/hero-section"
 import HowItWorks from "@/components/how-it-works"
@@ -35,29 +34,54 @@ export default function Home() {
   }
 
   const handleSwitchChange = (name: string, checked: boolean) => {
-    setFormData((prev) => ({ ...prev, [name]: checked }))
-  }
-
-  const handleSelectChange = (value: string) => {
-    setFormData((prev) => ({ ...prev, occasion: value }))
+    if (name === "isSale" && checked) {
+      setFormData((prev) => ({ ...prev, [name]: checked, includeText: true }))
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: checked }))
+    }
   }
 
   const handleSubmit = async (type: "image" | "video") => {
     setLoading(true)
 
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const response = await fetch('http://localhost:8000/generate-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          productName: formData.productName,
+          productDescription: formData.productDescription,
+          occasion: formData.occasion,
+          includeText: formData.includeText,
+          isSale: formData.isSale,
+          type: type
+        })
+      });
 
-      // Mock response
-      const mockUrl = type === "image" ? "/placeholder.svg?height=400&width=600" : "https://example.com/video.mp4"
+      if (!response.ok) {
+        throw new Error('Failed to generate content');
+      }
 
-      setGeneratedContent({ type, url: mockUrl })
+      const blob = await response.blob();
+      const imageUrl = URL.createObjectURL(blob);
+      
+      setGeneratedContent({ type, url: imageUrl });
     } catch (error) {
-      console.error("Error generating content:", error)
+      console.error("Error generating content:", error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
+  }
+
+  const handleDownload = () => {
+    if (!generatedContent?.url) return;
+    
+    const link = document.createElement("a");
+    link.href = generatedContent.url;
+    link.download = `social-media-post-${Date.now()}.png`;
+    link.click();
   }
 
   return (
@@ -125,18 +149,14 @@ export default function Home() {
 
                   <div className="space-y-2">
                     <Label htmlFor="occasion">Occasion</Label>
-                    <Select onValueChange={handleSelectChange} value={formData.occasion}>
-                      <SelectTrigger id="occasion" className="border-violet-200 focus:border-violet-400">
-                        <SelectValue placeholder="Select an occasion" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="birthday">Birthday</SelectItem>
-                        <SelectItem value="festival">Festival</SelectItem>
-                        <SelectItem value="newLaunch">New Launch</SelectItem>
-                        <SelectItem value="sale">Sale</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      id="occasion"
+                      name="occasion"
+                      placeholder="e.g. Summer Sale, Holiday Special"
+                      value={formData.occasion}
+                      onChange={handleInputChange}
+                      className="border-violet-200 focus:border-violet-400"
+                    />
                   </div>
 
                   <div className="flex items-center justify-between">
@@ -145,6 +165,7 @@ export default function Home() {
                         id="includeText"
                         checked={formData.includeText}
                         onCheckedChange={(checked) => handleSwitchChange("includeText", checked)}
+                        disabled={formData.isSale}
                       />
                       <Label htmlFor="includeText">Include Text on Post</Label>
                     </div>
@@ -207,7 +228,7 @@ export default function Home() {
                         <img
                           src={generatedContent.url || "/placeholder.svg"}
                           alt="Generated content"
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-contain"
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-violet-100">
@@ -220,7 +241,11 @@ export default function Home() {
                         <Send className="mr-2 h-4 w-4" />
                         Post to Social Media
                       </Button>
-                      <Button variant="outline" className="border-violet-200 text-violet-700">
+                      <Button 
+                        variant="outline" 
+                        className="border-violet-200 text-violet-700"
+                        onClick={handleDownload}
+                      >
                         <Download className="mr-2 h-4 w-4" />
                         Download
                       </Button>
