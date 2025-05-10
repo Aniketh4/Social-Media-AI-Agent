@@ -360,20 +360,17 @@ export default function ImageManipulator() {
   const cancelOverlayImage = () => {
     setTempOverlayImage(null)
   }
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
       <Navbar />
       <main className="container mx-auto px-4 py-8 pt-24">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent mb-8 text-center">
-            Image Editor
-          </h1>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Controls */}
             <div className="lg:col-span-4 space-y-6 bg-card/50 backdrop-blur-sm p-6 rounded-xl shadow-lg border">
               <div>
                 <Label htmlFor="base-image" className="text-base font-medium text-primary">Base Image</Label>
+                <p className="text-sm text-muted-foreground mb-2">Upload your main image to start editing</p>
                 <div className="flex gap-2 mt-2">
                   <Button 
                     onClick={triggerBaseImageUpload}
