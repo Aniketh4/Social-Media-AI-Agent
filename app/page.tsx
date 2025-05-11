@@ -45,7 +45,9 @@ export default function Home() {
     setLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/generate-image', {
+      const endpoint = type === "image" ? 'http://localhost:8000/generate-image' : 'http://localhost:8000/generate-video';
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -55,8 +57,7 @@ export default function Home() {
           productDescription: formData.productDescription,
           occasion: formData.occasion,
           includeText: formData.includeText,
-          isSale: formData.isSale,
-          type: type
+          isSale: formData.isSale
         })
       });
 
@@ -64,10 +65,16 @@ export default function Home() {
         throw new Error('Failed to generate content');
       }
 
-      const blob = await response.blob();
-      const imageUrl = URL.createObjectURL(blob);
-      
-      setGeneratedContent({ type, url: imageUrl });
+      if (type === "image") {
+        // For image, create blob URL directly from response
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setGeneratedContent({ type, url });
+      } else {
+        // For video, parse JSON response
+        const data = await response.json();
+        setGeneratedContent({ type, url: data.url });
+      }
     } catch (error) {
       console.error("Error generating content:", error);
     } finally {
@@ -75,13 +82,35 @@ export default function Home() {
     }
   }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!generatedContent?.url) return;
     
-    const link = document.createElement("a");
-    link.href = generatedContent.url;
-    link.download = `social-media-post-${Date.now()}.png`;
-    link.click();
+    try {
+      if (generatedContent.type === "image") {
+        // For images, fetch and create blob URL
+        const response = await fetch(generatedContent.url);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `social-media-post-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } else {
+        // For videos, use the signed URL directly
+        const link = document.createElement("a");
+        link.href = generatedContent.url;
+        link.download = `social-media-video-${Date.now()}.mp4`;
+        link.target = "_blank"; // Open in new tab for videos
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (error) {
+      console.error("Error downloading file:", error);
+    }
   }
 
   return (
@@ -226,14 +255,16 @@ export default function Home() {
                     <div className="aspect-video bg-gray-100 rounded-md overflow-hidden mb-4">
                       {generatedContent.type === "image" ? (
                         <img
-                          src={generatedContent.url || "/placeholder.svg"}
+                          src={generatedContent.url}
                           alt="Generated content"
                           className="w-full h-full object-contain"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-violet-100">
-                          <Video className="h-16 w-16 text-violet-500" />
-                        </div>
+                        <video
+                          src={generatedContent.url}
+                          controls
+                          className="w-full h-full object-contain"
+                        />
                       )}
                     </div>
                     <div className="flex justify-between">
