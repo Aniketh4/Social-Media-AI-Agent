@@ -1,20 +1,33 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Send, Calendar, Clock, Image as ImageIcon, Video, Upload, BarChart2, Sparkles, Target, TrendingUp, Zap, Settings, Brain, Clock4, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import Navbar from "@/components/navbar"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { format } from "date-fns"
 
 type PostMode = "predict" | "schedule" | null
 
 export default function PostPage() {
+  const router = useRouter()
   const [postMode, setPostMode] = useState<PostMode>(null)
   const [formData, setFormData] = useState({
     followers: "",
@@ -23,8 +36,6 @@ export default function PostPage() {
     category: "",
     caption: "",
     media: null as File | null,
-    username: "",
-    password: "",
     scheduledTime: "",
   })
 
@@ -38,6 +49,8 @@ export default function PostPage() {
   })
 
   const [isPredicting, setIsPredicting] = useState(false)
+  const [scheduledPosts, setScheduledPosts] = useState([])
+  const [showScheduledPosts, setShowScheduledPosts] = useState(false)
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
@@ -112,9 +125,70 @@ export default function PostPage() {
     setLoading(true)
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      alert(isScheduled ? "Post scheduled successfully!" : "Post published successfully!")
+      if (!formData.media) {
+        toast.error("Please upload an image first")
+        setLoading(false)
+        return
+      }
+
+      // First, save the image to the generated images directory
+      const formDataToSend = new FormData()
+      formDataToSend.append('file', formData.media)
+
+      // Save the image first
+      const saveResponse = await fetch('http://localhost:8000/save-image', {
+        method: 'POST',
+        body: formDataToSend,
+      })
+
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save image')
+      }
+
+      const { filename } = await saveResponse.json()
+
+      if (isScheduled) {
+        // Schedule the post
+        const scheduleResponse = await fetch('http://localhost:8000/schedule-post', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            image_path: filename,
+            caption: formData.caption,
+            scheduled_time: formData.scheduledTime
+          })
+        })
+
+        if (!scheduleResponse.ok) {
+          throw new Error('Failed to schedule post')
+        }
+
+        const result = await scheduleResponse.json()
+        toast.success('Post scheduled successfully!')
+        fetchScheduledPosts() // Refresh the scheduled posts list
+      } else {
+        // Publish immediately
+        const response = await fetch('http://localhost:8000/publish-to-instagram', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            image_path: filename,
+            caption: formData.caption
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to publish post')
+        }
+
+        toast.success('Post published successfully!')
+      }
       
+      // Reset form
       setFormData({
         followers: "",
         platform: "",
@@ -122,17 +196,130 @@ export default function PostPage() {
         category: "",
         caption: "",
         media: null,
-        username: "",
-        password: "",
         scheduledTime: "",
       })
       setPredictions({ engagement: null, bestTime: null })
     } catch (error) {
       console.error("Error:", error)
-      alert("Failed to process post")
+      toast.error(error instanceof Error ? error.message : "Failed to process post")
     } finally {
       setLoading(false)
     }
+  }
+
+  useEffect(() => {
+    fetchScheduledPosts()
+    // Poll for updates every minute
+    const interval = setInterval(fetchScheduledPosts, 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const fetchScheduledPosts = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/scheduled-posts')
+      if (!response.ok) {
+        throw new Error('Failed to fetch scheduled posts')
+      }
+      const data = await response.json()
+      setScheduledPosts(data.posts)
+    } catch (error) {
+      console.error('Error fetching scheduled posts:', error)
+      toast.error('Failed to fetch scheduled posts')
+    }
+  }
+
+  const deleteScheduledPost = async (postId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/scheduled-posts/${postId}`, {
+        method: 'DELETE',
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete post')
+      }
+      
+      fetchScheduledPosts()
+      toast.success('Post deleted successfully')
+    } catch (error) {
+      console.error('Error deleting post:', error)
+      toast.error('Failed to delete post')
+    }
+  }
+
+  const renderScheduledPosts = () => {
+    if (!scheduledPosts.length) {
+      return (
+        <div className="mt-8 p-6 bg-white rounded-lg shadow-sm border border-violet-100 text-center">
+          <p className="text-gray-500">No scheduled posts found</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="mt-8 p-6 bg-white rounded-lg shadow-sm border border-violet-100">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-violet-900">Scheduled Posts</h2>
+          <Button
+            variant="ghost"
+            onClick={() => setShowScheduledPosts(false)}
+            className="text-violet-600 hover:text-violet-700"
+          >
+            Hide Table
+          </Button>
+        </div>
+        
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[200px]">Scheduled Time</TableHead>
+              <TableHead>Caption</TableHead>
+              <TableHead className="w-[100px]">Status</TableHead>
+              <TableHead className="w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {scheduledPosts.map((post: any) => (
+              <TableRow key={post.id}>
+                <TableCell className="font-medium">
+                  {format(new Date(post.scheduled_time), 'MMM d, yyyy h:mm a')}
+                </TableCell>
+                <TableCell className="max-w-md truncate">
+                  {post.caption}
+                </TableCell>
+                <TableCell>
+                  <Badge
+                    variant={
+                      post.status === 'pending' ? 'default' :
+                      post.status === 'published' ? 'secondary' :
+                      'destructive'
+                    }
+                    className={
+                      post.status === 'pending' ? 'bg-violet-100 text-violet-700' :
+                      post.status === 'published' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-red-100 text-red-700'
+                    }
+                  >
+                    {post.status.charAt(0).toUpperCase() + post.status.slice(1)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {post.status === 'pending' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteScheduledPost(post.id)}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    )
   }
 
   return (
@@ -415,49 +602,35 @@ export default function PostPage() {
                             className="flex flex-col items-center justify-center w-full h-40 border-2 border-violet-200 border-dashed rounded-lg cursor-pointer bg-violet-50 hover:bg-violet-100 transition-colors"
                           >
                             <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                              <Upload className="w-10 h-10 mb-3 text-violet-500" />
-                              <p className="mb-2 text-base text-gray-900">
-                                <span className="font-semibold">Click to upload</span> or drag and drop
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                {formData.postType === "video" ? "MP4, MOV up to 100MB" : "PNG, JPG up to 10MB"}
-                              </p>
+                              {formData.media ? (
+                                <div className="text-center">
+                                  <p className="text-base text-gray-900 font-semibold">
+                                    {formData.media.name}
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    {(formData.media.size / 1024 / 1024).toFixed(2)} MB
+                                  </p>
+                                </div>
+                              ) : (
+                                <>
+                                  <Upload className="w-10 h-10 mb-3 text-violet-500" />
+                                  <p className="mb-2 text-base text-gray-900">
+                                    <span className="font-semibold">Click to upload</span> or drag and drop
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    PNG, JPG up to 10MB
+                                  </p>
+                                </>
+                              )}
                             </div>
                             <input
                               id="media"
                               type="file"
                               className="hidden"
-                              accept={formData.postType === "video" ? "video/*" : "image/*"}
+                              accept="image/*"
                               onChange={handleFileChange}
                             />
                           </label>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-2">
-                          <Label htmlFor="username" className="text-base text-gray-900">Username</Label>
-                          <Input
-                            id="username"
-                            name="username"
-                            placeholder="Enter username"
-                            value={formData.username}
-                            onChange={handleInputChange}
-                            className="border-violet-200 focus:border-violet-400 h-12 text-base"
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="password" className="text-base text-gray-900">Password</Label>
-                          <Input
-                            id="password"
-                            name="password"
-                            type="password"
-                            placeholder="Enter password"
-                            value={formData.password}
-                            onChange={handleInputChange}
-                            className="border-violet-200 focus:border-violet-400 h-12 text-base"
-                          />
                         </div>
                       </div>
 
@@ -477,20 +650,38 @@ export default function PostPage() {
                         <Button
                           type="button"
                           onClick={(e) => handleSubmit(e, false)}
-                          disabled={loading || !formData.caption || !formData.platform || !formData.postType || !formData.category}
+                          disabled={loading || !formData.caption || !formData.media}
                           className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 h-12 text-base"
                         >
-                          <Send className="mr-2 h-5 w-5" />
-                          Post Now
+                          {loading ? (
+                            <>
+                              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                              Publishing...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="mr-2 h-5 w-5" />
+                              Post Now
+                            </>
+                          )}
                         </Button>
 
                         <Button
                           type="submit"
-                          disabled={loading || !formData.caption || !formData.platform || !formData.postType || !formData.category || !formData.scheduledTime}
+                          disabled={loading || !formData.caption || !formData.media || !formData.scheduledTime}
                           className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 h-12 text-base"
                         >
-                          <Clock4 className="mr-2 h-5 w-5" />
-                          Schedule Post
+                          {loading ? (
+                            <>
+                              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                              Scheduling...
+                            </>
+                          ) : (
+                            <>
+                              <Clock4 className="mr-2 h-5 w-5" />
+                              Schedule Post
+                            </>
+                          )}
                         </Button>
                       </div>
                     </form>
@@ -499,6 +690,33 @@ export default function PostPage() {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+      </section>
+
+      <section className="py-12 px-4">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-violet-900">Post Management</h2>
+            <Button
+              onClick={() => setShowScheduledPosts(!showScheduledPosts)}
+              variant="outline"
+              className="text-violet-600 hover:text-violet-700"
+            >
+              {showScheduledPosts ? (
+                <>
+                  <Clock4 className="mr-2 h-4 w-4" />
+                  Hide Scheduled Posts
+                </>
+              ) : (
+                <>
+                  <Clock4 className="mr-2 h-4 w-4" />
+                  View Scheduled Posts
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {showScheduledPosts && renderScheduledPosts()}
         </div>
       </section>
     </main>
