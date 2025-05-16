@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
-import { Download } from "lucide-react"
+import { Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -26,6 +26,16 @@ interface Overlay {
   isResizing: boolean
 }
 
+// Add default overlays configuration
+const DEFAULT_OVERLAYS = [
+  { name: "5% Off", path: "/overlays/5-off.png" },
+  { name: "10% Off", path: "/overlays/10-off.png" },
+  { name: "New Year", path: "/overlays/new-year.png" },
+  { name: "Diwali Sale", path: "/overlays/diwali-sale.png" },
+  { name: "Limited Time", path: "/overlays/limited-time.png" },
+  { name: "Free Shipping", path: "/overlays/free-shipping.png" },
+]
+
 export default function ImageManipulator() {
   const [baseImage, setBaseImage] = useState<HTMLImageElement | null>(null)
   const [overlays, setOverlays] = useState<Overlay[]>([])
@@ -40,6 +50,9 @@ export default function ImageManipulator() {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [overlayImageSize, setOverlayImageSize] = useState(200)
   const [tempOverlayImage, setTempOverlayImage] = useState<HTMLImageElement | null>(null)
+  const [secondaryColor, setSecondaryColor] = useState("#FFFFFF")
+  const [activeOverlayType, setActiveOverlayType] = useState<'image' | 'text'>('image')
+  const [isGenerating, setIsGenerating] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -270,12 +283,16 @@ export default function ImageManipulator() {
     const canvas = canvasRef.current
     if (!canvas || !baseImage) return
 
-    const ctx = canvas.getContext("2d")
+    const ctx = canvas.getContext("2d", { alpha: true })
     if (!ctx) return
 
     // Set canvas size to match base image
     canvas.width = baseImage.width
     canvas.height = baseImage.height
+
+    // Enable image smoothing for better quality
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -295,16 +312,13 @@ export default function ImageManipulator() {
 
       // Draw selection indicator if overlay is selected
       if (overlay.id === selectedOverlay) {
-        // Draw semi-transparent background
         ctx.fillStyle = "rgba(59, 130, 246, 0.1)"
         ctx.fillRect(overlay.x - 2, overlay.y - 2, overlay.width + 4, overlay.height + 4)
 
-        // Draw border
         ctx.strokeStyle = "#3b82f6"
         ctx.lineWidth = 2
         ctx.strokeRect(overlay.x - 2, overlay.y - 2, overlay.width + 4, overlay.height + 4)
 
-        // Draw resize handle
         const handleSize = 8
         ctx.fillStyle = "#3b82f6"
         ctx.fillRect(
@@ -360,6 +374,69 @@ export default function ImageManipulator() {
   const cancelOverlayImage = () => {
     setTempOverlayImage(null)
   }
+
+  // Add function to handle default overlay selection
+  const handleDefaultOverlaySelect = (path: string) => {
+    const img = new Image()
+    img.onload = () => {
+      setTempOverlayImage(img)
+    }
+    img.src = path
+  }
+
+  // Update the generateAIOverlay function
+  const generateAIOverlay = async () => {
+    try {
+      setIsGenerating(true)
+      const response = await fetch('http://localhost:8000/generate-overlay', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: textInput,
+          baseColor: textColor,
+          secondaryColor: secondaryColor
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate overlay');
+      }
+
+      const blob = await response.blob();
+      const imageUrl = URL.createObjectURL(blob);
+      
+      const img = new Image();
+      img.onload = () => {
+        // Create a canvas to handle the image at full resolution
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Set canvas size to match image dimensions
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        // Draw image at full resolution
+        ctx.drawImage(img, 0, 0);
+
+        // Create a new image from the canvas
+        const highQualityImage = new Image();
+        highQualityImage.onload = () => {
+          setTempOverlayImage(highQualityImage);
+          setTextInput('');
+        };
+        highQualityImage.src = canvas.toDataURL('image/png', 1.0); // Use maximum quality
+      };
+      img.src = imageUrl;
+    } catch (error) {
+      console.error('Error generating overlay:', error);
+    } finally {
+      setIsGenerating(false)
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/20">
       <Navbar />
@@ -390,113 +467,254 @@ export default function ImageManipulator() {
                 </div>
               </div>
 
-              <div>
-                <Label htmlFor="overlay-image" className="text-base font-medium text-primary">Overlay Image</Label>
-                <div className="flex gap-2 mt-2">
-                  <Button 
-                    onClick={triggerOverlayImageUpload}
-                    variant="outline"
-                    className="w-full hover:bg-primary/10"
-                  >
-                    Choose Overlay Image
-                  </Button>
-                  <Input
-                    id="overlay-image"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleOverlayImageUpload}
-                    ref={overlayFileInputRef}
-                    className="hidden"
-                  />
+              {/* Overlay Controls */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-primary">Overlays</h3>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveOverlayType('image')}
+                      className={activeOverlayType === 'image' ? 'bg-primary/10' : ''}
+                    >
+                      Image
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActiveOverlayType('text')}
+                      className={activeOverlayType === 'text' ? 'bg-primary/10' : ''}
+                    >
+                      Text
+                    </Button>
+                  </div>
                 </div>
 
-                {tempOverlayImage && (
-                  <div className="mt-4 space-y-4 p-4 bg-primary/5 rounded-lg">
+                {/* Image Overlay Section */}
+                {activeOverlayType === 'image' && (
+                  <div className="space-y-4">
                     <div>
-                      <Label className="text-base font-medium text-primary">Image Size</Label>
+                      <Label className="text-base font-medium text-primary">AI Generated Overlays</Label>
+                      <div className="space-y-4 mt-2">
+                        <div>
+                          <Label className="text-sm">Overlay Text</Label>
+                          <Input
+                            placeholder="e.g., 50% OFF, New Year Special"
+                            className="mt-1"
+                            value={textInput}
+                            onChange={(e) => setTextInput(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm">Primary Color</Label>
+                          <div className="flex gap-2 mt-1">
+                            <Input
+                              type="color"
+                              value={textColor}
+                              onChange={(e) => setTextColor(e.target.value)}
+                              className="w-12 h-10"
+                            />
+                            <Input
+                              value={textColor}
+                              onChange={(e) => setTextColor(e.target.value)}
+                              className="flex-1"
+                              placeholder="#000000"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-sm">Secondary Color (Optional)</Label>
+                          <div className="flex gap-2 mt-1">
+                            <Input
+                              type="color"
+                              value={secondaryColor}
+                              onChange={(e) => setSecondaryColor(e.target.value)}
+                              className="w-12 h-10"
+                            />
+                            <Input
+                              value={secondaryColor}
+                              onChange={(e) => setSecondaryColor(e.target.value)}
+                              className="flex-1"
+                              placeholder="#FFFFFF"
+                            />
+                          </div>
+                        </div>
+                        <Button 
+                          onClick={generateAIOverlay}
+                          className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700"
+                          disabled={!textInput.trim() || isGenerating}
+                        >
+                          {isGenerating ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Generating...
+                            </>
+                          ) : (
+                            'Generate Overlay'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                      <Label className="text-base font-medium text-primary">Default Overlays</Label>
+                      <Select onValueChange={handleDefaultOverlaySelect}>
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select an overlay" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DEFAULT_OVERLAYS.map((overlay) => (
+                            <SelectItem key={overlay.path} value={overlay.path}>
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={overlay.path}
+                                  alt={overlay.name}
+                                  className="h-6 w-auto object-contain"
+                                />
+                                <span>{overlay.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="overlay-image" className="text-base font-medium text-primary">Custom Overlay</Label>
+                      <div className="flex gap-2 mt-2">
+                        <Button 
+                          onClick={triggerOverlayImageUpload}
+                          variant="outline"
+                          className="w-full hover:bg-primary/10"
+                        >
+                          Upload Custom Image
+                        </Button>
+                        <Input
+                          id="overlay-image"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleOverlayImageUpload}
+                          ref={overlayFileInputRef}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+
+                    {tempOverlayImage && (
+                      <div className="mt-4 space-y-4 p-4 bg-primary/5 rounded-lg">
+                        <div>
+                          <Label className="text-base font-medium text-primary">Image Size</Label>
+                          <Slider
+                            value={[overlayImageSize]}
+                            onValueChange={(value) => setOverlayImageSize(value[0])}
+                            min={50}
+                            max={500}
+                            step={10}
+                            className="mt-2"
+                          />
+                          <span className="text-sm text-muted-foreground mt-1 block">{overlayImageSize}px</span>
+                        </div>
+                        <div>
+                          <div className="mt-2 p-2 border rounded-lg">
+                            <div className="relative aspect-video bg-muted">
+                              {/* Add cropping interface here */}
+                              <img
+                                src={tempOverlayImage.src}
+                                alt="Preview"
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button 
+                            onClick={addOverlayImage}
+                            className="flex-1 bg-violet-600 hover:bg-violet-700"
+                          >
+                            Add Image
+                          </Button>
+                          <Button 
+                            onClick={cancelOverlayImage}
+                            variant="outline"
+                            className="flex-1"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Text Overlay Section */}
+                {activeOverlayType === 'text' && (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="text-input" className="text-base font-medium text-primary">Text Overlay</Label>
+                      <div className="flex gap-2 mt-2">
+                        <Input
+                          id="text-input"
+                          value={textInput}
+                          onChange={(e) => setTextInput(e.target.value)}
+                          placeholder="Enter text..."
+                          className="focus-visible:ring-violet-500"
+                        />
+                        <Button 
+                          onClick={addTextOverlay}
+                          className="bg-violet-600 hover:bg-violet-700"
+                        >
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-base font-medium text-primary">Font Size</Label>
                       <Slider
-                        value={[overlayImageSize]}
-                        onValueChange={(value) => setOverlayImageSize(value[0])}
-                        min={50}
-                        max={500}
-                        step={10}
+                        value={[fontSize]}
+                        onValueChange={(value) => setFontSize(value[0])}
+                        min={12}
+                        max={72}
+                        step={1}
                         className="mt-2"
                       />
-                      <span className="text-sm text-muted-foreground mt-1 block">{overlayImageSize}px</span>
+                      <span className="text-sm text-muted-foreground mt-1 block">{fontSize}px</span>
                     </div>
-                    <div className="flex gap-2">
-                      <Button 
-                        onClick={addOverlayImage}
-                        className="flex-1 bg-violet-600 hover:bg-violet-700"
-                      >
-                        Add Image
-                      </Button>
-                      <Button 
-                        onClick={cancelOverlayImage}
-                        variant="outline"
-                        className="flex-1"
-                      >
-                        Cancel
-                      </Button>
+
+                    <div>
+                      <Label className="text-base font-medium text-primary">Font Family</Label>
+                      <Select value={fontFamily} onValueChange={setFontFamily}>
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select font" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Arial">Arial</SelectItem>
+                          <SelectItem value="Times New Roman">Times New Roman</SelectItem>
+                          <SelectItem value="Courier New">Courier New</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-base font-medium text-primary">Text Color</Label>
+                      <div className="flex gap-2 mt-2">
+                        <Input
+                          type="color"
+                          value={textColor}
+                          onChange={(e) => setTextColor(e.target.value)}
+                          className="w-12 h-10"
+                        />
+                        <Input
+                          value={textColor}
+                          onChange={(e) => setTextColor(e.target.value)}
+                          className="flex-1"
+                          placeholder="#000000"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
-
-              <div>
-                <Label htmlFor="text-input" className="text-base font-medium text-primary">Text Overlay</Label>
-                <div className="flex gap-2 mt-2">
-                  <Input
-                    id="text-input"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Enter text..."
-                    className="focus-visible:ring-violet-500"
-                  />
-                  <Button 
-                    onClick={addTextOverlay}
-                    className="bg-violet-600 hover:bg-violet-700"
-                  >
-                    Add
-                  </Button>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-base font-medium text-primary">Font Size</Label>
-                <Slider
-                  value={[fontSize]}
-                  onValueChange={(value) => setFontSize(value[0])}
-                  min={12}
-                  max={72}
-                  step={1}
-                  className="mt-2"
-                />
-                <span className="text-sm text-muted-foreground mt-1 block">{fontSize}px</span>
-              </div>
-
-              <div>
-                <Label className="text-base font-medium text-primary">Font Family</Label>
-                <Select value={fontFamily} onValueChange={setFontFamily}>
-                  <SelectTrigger className="mt-2">
-                    <SelectValue placeholder="Select font" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Arial">Arial</SelectItem>
-                    <SelectItem value="Times New Roman">Times New Roman</SelectItem>
-                    <SelectItem value="Courier New">Courier New</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-base font-medium text-primary">Text Color</Label>
-                <Input
-                  type="color"
-                  value={textColor}
-                  onChange={(e) => setTextColor(e.target.value)}
-                  className="w-full h-10 mt-2"
-                />
               </div>
 
               {selectedOverlay && (
